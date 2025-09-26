@@ -17,14 +17,14 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @connect      telemetry.thebluecorner.net
-// @resource     overlayCSS https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/overlay.css
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/utils.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/apiManager.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/Overlay.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/Template.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/templateManager.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/observers.js
-// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/main.js
+// @resource     overlayCSS https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/overlay.css
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/utils.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/apiManager.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/Overlay.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/Template.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/templateManager.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/observers.js
+// @require      https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/src/main.js
 // @updateURL    https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/BlueMarble.meta.js
 // @downloadURL  https://cdn.jsdelivr.net/gh/asango100/Wplace-BlueMarble-MinorMods@v0.1.0/BlueMarble.user.js
 // ==/UserScript==
