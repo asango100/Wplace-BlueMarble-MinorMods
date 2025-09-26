@@ -60,6 +60,19 @@ export default class Template {
 
     const keyOther = 'other';
     this.allowedColorsSet.add(keyOther); // Special "other" key for non-palette colors
+    this.allowedColorsSet.delete('other'); // Remove "other" key, since it interferes with the template rings
+
+    try {
+      const palette = Array.isArray(colorpalette) ? colorpalette : [];
+      this.paletteList = palette
+        .filter(c => (c?.name || '').toLowerCase() !== 'transparent' && Array.isArray(c?.rgb))
+        .map(c => ({
+          key: `${c.rgb[0]},${c.rgb[1]},${c.rgb[2]}`,
+          r: c.rgb[0] | 0, g: c.rgb[1] | 0, b: c.rgb[2] | 0
+        }));
+    } catch (_) {
+      this.paletteList = [];
+    }
 
     // Map rgb-> {id, premium}
     this.rgbToMeta = new Map(
@@ -74,11 +87,6 @@ export default class Template {
       if (transparent && Array.isArray(transparent.rgb)) {
         this.rgbToMeta.set(defaceKey, { id: transparent.id, premium: !!transparent.premium, name: transparent.name });
       }
-    } catch (ignored) {}
-
-    // Map other key to Other meta for UI naming and ID continuity
-    try {
-      this.rgbToMeta.set(keyOther, { id: 'other', premium: false, name: 'Other' });
     } catch (ignored) {}
 
     console.log('Allowed colors for template:', this.allowedColorsSet);
@@ -127,7 +135,7 @@ export default class Template {
           const a = inspectData[idx + 3];
           if (a === 0) { continue; } // Ignored transparent pixel
           if (r === 222 && g === 250 && b === 206) { deface++; }
-          const key = this.allowedColorsSet.has(`${r},${g},${b}`) ? `${r},${g},${b}` : 'other';
+          const key = this.findNearestPaletteKey(r, g, b);
           //if (!this.allowedColorsSet.has(key)) { continue; } // Skip non-palette colors (but #deface added to allowed)
           required++;
           paletteMap.set(key, (paletteMap.get(key) || 0) + 1);
@@ -282,4 +290,20 @@ export default class Template {
     console.log('Template Tiles Buffers: ', templateTilesBuffers);
     return { templateTiles, templateTilesBuffers };
   }
+
+  findNearestPaletteKey(r, g, b) {
+  // If it’s already exact, keep it
+  const k = `${r|0},${g|0},${b|0}`;
+  if (this.allowedColorsSet.has(k)) return k;
+
+  // Fall back to nearest wPlace palette color (exclude Transparent by construction)
+  let bestKey = k, best = Infinity;
+  const rr = r|0, gg = g|0, bb = b|0;
+  for (const c of this.paletteList || []) {
+    const dr = rr - c.r, dg = gg - c.g, db = bb - c.b;
+    const d = dr*dr + dg*dg + db*db;
+    if (d < best) { best = d; bestKey = c.key; }
+  }
+  return bestKey; // if paletteList empty, returns original k
+}
 }

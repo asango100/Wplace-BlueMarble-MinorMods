@@ -42,6 +42,7 @@ export default class Overlay {
     this.overlay = null; // The overlay root DOM HTMLElement
     this.currentParent = null; // The current parent HTMLElement in the overlay
     this.parentStack = []; // Tracks the parent elements BEFORE the currentParent so we can nest elements
+
   }
 
   /** Populates the apiManager variable with the apiManager class.

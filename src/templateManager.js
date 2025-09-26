@@ -1,6 +1,16 @@
 import Template from "./Template";
 import { base64ToUint8, numberToEncoded } from "./utils";
 
+//Variables for ring modes
+const RINGS_OFF = 0;
+const RINGS_WRONG_ONLY = 1;
+const RINGS_WRONG_PLUS_OVERDRAWN = 2;
+
+function makeCanvas(w, h) {
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; return c;
+}
+
 /** Manages the template system.
  * This class handles all external requests for template modification, creation, and analysis.
  * It serves as the central coordinator between template instances and the user interface.
@@ -34,6 +44,7 @@ import { base64ToUint8, numberToEncoded } from "./utils";
  *   }
  * }
  */
+
 export default class TemplateManager {
 
   /** The constructor for the {@link TemplateManager} class.
@@ -62,6 +73,12 @@ export default class TemplateManager {
     this.templatesJSON = null; // All templates currently loaded (JSON)
     this.templatesShouldBeDrawn = true; // Should ALL templates be drawn to the canvas?
     this.tileProgress = new Map(); // Tracks per-tile progress stats {painted, required, wrong}
+
+    this._ringsCanvas = null;
+    this._ringsCtx = null;
+    this._ringsDirty = false;
+    this.ringsMode = RINGS_OFF;
+    this.ringRadiusScale = 0.75; 
   }
 
   /** Retrieves the pixel art canvas.
@@ -151,7 +168,9 @@ export default class TemplateManager {
       "coords": coords.join(', '), // The coords of the template
       "enabled": true,
       "tiles": templateTilesBuffers, // Stores the chunked tile buffers
-      "palette": template.colorPalette // Persist palette and enabled flags
+      "palette": template.colorPalette, // Persist palette and enabled flags
+      "pixelCount": template.pixelCount || 0,
+      "requiredPixelCount": template.requiredPixelCount || 0
     };
 
     this.templatesArray = []; // Remove this to enable multiple templates (2/2)
@@ -209,6 +228,7 @@ export default class TemplateManager {
 
   }
 
+
   /** Draws all templates on the specified tile.
    * This method handles the rendering of template overlays on individual tiles.
    * @param {File} tileBlob - The pixels that are placed on a tile
@@ -218,8 +238,11 @@ export default class TemplateManager {
   async drawTemplateOnTile(tileBlob, tileCoords) {
 
     // Returns early if no templates should be drawn
-    if (!this.templatesShouldBeDrawn) {return tileBlob;}
-
+    if (!this.templatesShouldBeDrawn) { return tileBlob; }
+    const ringsEnabled = this.ringsMode !== 0;
+    const includeOverdrawn = this.ringsMode === 2;
+    const wrongCenters = []; // {x, y, kind: 'missing'|'wrongcolor'|'overdrawn'}
+    const alphaCut = 64; 
     const drawSize = this.tileSize * this.drawMult; // Calculate draw multiplier for scaling
 
     // Format tile coordinates with proper padding for consistent lookup
@@ -249,8 +272,8 @@ export default class TemplateManager {
 
     // Retrieves the relavent template tile blobs
     const templatesToDraw = templateArray
-      .map(template => {
-        const matchingTiles = Object.keys(template.chunked).filter(tile =>
+      .map(tpl => {
+        const matchingTiles = Object.keys(tpl.chunked).filter(tile =>
           tile.startsWith(tileCoords)
         );
 
@@ -262,7 +285,8 @@ export default class TemplateManager {
           const coords = tile.split(','); // [x, y, x, y] Tile/pixel coordinates
           
           return {
-            bitmap: template.chunked[tile],
+            tpl,
+            bitmap: tpl.chunked[tile],
             tileCoords: [coords[0], coords[1]],
             pixelCoords: [coords[2], coords[3]]
           }
@@ -306,27 +330,33 @@ export default class TemplateManager {
     }
 
     // For each template in this tile, draw them.
-    for (const template of templatesToDraw) {
+    for (const entry of templatesToDraw) {
       console.log(`Template:`);
-      console.log(template);
+      console.log(entry);
+
+      const tpl = entry.tpl;
+      const bmp = entry.bitmap;
+      const px = Number(entry.pixelCoords[0]) * this.drawMult | 0;
+      const py = Number(entry.pixelCoords[1]) * this.drawMult | 0;
+      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+        console.warn('Bad pixelCoords for template tile:', entry.pixelCoords, '→ px/py=', px, py);
+        continue;
+      }
+
 
       // Compute stats by sampling template center pixels against tile pixels,
       // honoring color enable/disable from the active template's palette
       if (tilePixels) {
         try {
-          
-          const tempWidth = template.bitmap.width;
-          const tempHeight = template.bitmap.height;
+          const tempWidth = bmp.width;
+          const tempHeight = bmp.height;
           const tempCanvas = new OffscreenCanvas(tempWidth, tempHeight);
           const tempContext = tempCanvas.getContext('2d', { willReadFrequently: true });
           tempContext.imageSmoothingEnabled = false;
           tempContext.clearRect(0, 0, tempWidth, tempHeight);
-          tempContext.drawImage(template.bitmap, 0, 0);
+          tempContext.drawImage(bmp, 0, 0);
           const tImg = tempContext.getImageData(0, 0, tempWidth, tempHeight);
           const tData = tImg.data; // Tile Data, Template Data, or Temp Data????
-
-          const offsetX = Number(template.pixelCoords[0]) * this.drawMult;
-          const offsetY = Number(template.pixelCoords[1]) * this.drawMult;
 
           // Loops over all pixels in the template
           // Assigns each pixel a color (if center pixel)
@@ -334,12 +364,10 @@ export default class TemplateManager {
             for (let x = 0; x < tempWidth; x++) {
               // Purpose: Count which pixels are painted correctly???
 
-              // Only evaluate the center pixel of each shread block
-              // Skip if not the center pixel of the shread block
-              if ((x % this.drawMult) !== 1 || (y % this.drawMult) !== 1) { continue; }
+              const gx = x + px | 0;
+              const gy = y + py | 0;
 
-              const gx = x + offsetX;
-              const gy = y + offsetY;
+              if ((gx % this.drawMult) !== 1 || (gy % this.drawMult) !== 1) { continue; }
 
               // IF the pixel is out of bounds of the template, OR if the pixel is outside of the tile, then skip the pixel
               if (gx < 0 || gy < 0 || gx >= drawSize || gy >= drawSize) { continue; }
@@ -355,22 +383,17 @@ export default class TemplateManager {
               // If the alpha of the center pixel is less than 64...
               if (templatePixelCenterAlpha < 64) {
                 try {
-                  const activeTemplate = this.templatesArray?.[0];
                   const tileIdx = (gy * drawSize + gx) * 4;
                   const pr = tilePixels[tileIdx];
                   const pg = tilePixels[tileIdx + 1];
                   const pb = tilePixels[tileIdx + 2];
                   const pa = tilePixels[tileIdx + 3];
 
-                  const key = activeTemplate.allowedColorsSet.has(`${pr},${pg},${pb}`) ? `${pr},${pg},${pb}` : 'other';
-
-                  const isSiteColor = activeTemplate?.allowedColorsSet ? activeTemplate.allowedColorsSet.has(key) : false;
-                  
-                  // IF the alpha of the center pixel that is placed on the canvas is greater than or equal to 64, AND the pixel is a Wplace palette color, then it is incorrect.
-                  if (pa >= 64 && isSiteColor) {
-                    wrongCount++;
+                  if (includeOverdrawn && pa >= 64) {
+                    wrongCenters.push({ x: gx, y: gy, kind: 'overdrawn' });
                   }
                 } catch (ignored) {}
+
 
                 continue; // Continue to the next pixel
               }
@@ -392,7 +415,7 @@ export default class TemplateManager {
 
               // Strict center-pixel matching. Treat transparent tile pixels as unpainted (not wrong)
               const realPixelCenter = (gy * drawSize + gx) * 4;
-              const realPixelRed = tilePixels[realPixelCenter];
+              const realPixelCenterRed = tilePixels[realPixelCenter];
               const realPixelCenterGreen = tilePixels[realPixelCenter + 1];
               const realPixelCenterBlue = tilePixels[realPixelCenter + 2];
               const realPixelCenterAlpha = tilePixels[realPixelCenter + 3];
@@ -400,12 +423,19 @@ export default class TemplateManager {
               // IF the alpha of the pixel is less than 64...
               if (realPixelCenterAlpha < 64) {
                 // Unpainted -> neither painted nor wrong
+                wrongCenters.push({ x: gx, y: gy, kind: 'missing' });
+                wrongCount++;
 
                 // ELSE IF the pixel matches the template center pixel color
-              } else if (realPixelRed === templatePixelCenterRed && realPixelCenterGreen === templatePixelCenterGreen && realPixelCenterBlue === templatePixelCenterBlue) {
-                paintedCount++; // ...the pixel is painted correctly
               } else {
-                wrongCount++; // ...the pixel is NOT painted correctly
+                const tplKey = tpl.findNearestPaletteKey(templatePixelCenterRed, templatePixelCenterGreen, templatePixelCenterBlue);
+                const siteKey = tpl.findNearestPaletteKey(realPixelCenterRed, realPixelCenterGreen, realPixelCenterBlue);
+                if (tplKey === siteKey) {
+                  paintedCount++; // ...the pixel is painted correctly
+                } else {
+                  wrongCount++; // ...the pixel is NOT painted correctly
+                  wrongCenters.push({ x: gx, y: gy, kind: 'wrongcolor' });
+                }
               }
             }
           }
@@ -416,27 +446,59 @@ export default class TemplateManager {
 
       // Draw the template overlay for visual guidance, honoring color filter
       try {
-
-        const activeTemplate = this.templatesArray?.[0]; // Get the first template
-        const palette = activeTemplate?.colorPalette || {}; // Obtain the color palette of the template
+        const palette = tpl?.colorPalette || {}; // Obtain the color palette of the template
         const hasDisabled = Object.values(palette).some(v => v?.enabled === false); // Check if any color is disabled
 
+            
+        if (ringsEnabled && wrongCenters.length) {
+          context.save();
+          context.imageSmoothingEnabled = false;
+          context.lineWidth = 1;
+
+          const r = Math.max(10.0, this.drawMult * this.ringRadiusScale);
+          // Batch rings per category
+          const pathMissing = new Path2D();
+          const pathWrong   = new Path2D();
+          const pathOver    = new Path2D();
+
+          for (const p of wrongCenters) {
+            const cx = p.x + 0.5, cy = p.y + 0.5;
+            if (p.kind === 'missing') pathMissing.moveTo(cx + r, cy), pathMissing.arc(cx, cy, r, 0, Math.PI * 2);
+            else if (p.kind === 'wrongcolor') pathWrong.moveTo(cx + r, cy), pathWrong.arc(cx, cy, r, 0, Math.PI * 2);
+            else /* overdrawn */ pathOver.moveTo(cx + r, cy), pathOver.arc(cx, cy, r, 0, Math.PI * 2);
+          }
+
+          // Colors: tweak as desired
+          // missing → yellow; wrongcolor → red; overdrawn → cyan
+          // Keep alpha high so rings stand out on busy tiles
+          if (pathMissing) { context.strokeStyle = 'rgba(255,220,0,0.95)'; context.shadowColor = context.strokeStyle; context.shadowBlur = 1.5; context.stroke(pathMissing); }
+          if (pathWrong)   { context.strokeStyle = 'rgba(255,  0,0,0.95)'; context.shadowColor = context.strokeStyle; context.shadowBlur = 1.5; context.stroke(pathWrong); }
+          if (includeOverdrawn && pathOver) {
+            context.strokeStyle = 'rgba(0,220,255,0.95)';
+            context.shadowColor = context.strokeStyle;
+            context.shadowBlur = 1.5;
+            context.stroke(pathOver);
+          }
+
+          context.restore();
+        }
+        
         // If none of the template colors are disabled, then draw the image normally
         if (!hasDisabled) {
-          context.drawImage(template.bitmap, Number(template.pixelCoords[0]) * this.drawMult, Number(template.pixelCoords[1]) * this.drawMult);
+          context.drawImage(bmp, px, py);
         } else {
           // ELSE we need to apply the color filter
 
           console.log('Applying color filter...');
 
-          const tempW = template.bitmap.width;
-          const tempH = template.bitmap.height;
+          const tempW = bmp.width;
+          const tempH = bmp.height;
 
           const filterCanvas = new OffscreenCanvas(tempW, tempH);
           const filterCtx = filterCanvas.getContext('2d', { willReadFrequently: true });
           filterCtx.imageSmoothingEnabled = false; // Nearest neighbor
           filterCtx.clearRect(0, 0, tempW, tempH);
-          filterCtx.drawImage(template.bitmap, 0, 0);
+          filterCtx.drawImage(bmp, 0, 0);
 
           const img = filterCtx.getImageData(0, 0, tempW, tempH);
           const data = img.data;
@@ -456,18 +518,10 @@ export default class TemplateManager {
 
               if (a < 1) { continue; }
 
-              let key = activeTemplate.allowedColorsSet.has(`${r},${g},${b}`) ? `${r},${g},${b}` : 'other';
-
-              // Hide if color is not in allowed palette or explicitly disabled
-              const inWplacePalette = activeTemplate?.allowedColorsSet ? activeTemplate.allowedColorsSet.has(key) : true;
-
-              // if (inWplacePalette) {
-              //   key = 'other'; // Map all non-palette colors to "other"
-              //   console.log('Added color to other');
-              // }
-
+              // Map any non-palette RGB to the nearest wPlace color
+              const key = tpl.findNearestPaletteKey(r, g, b);
               const isPaletteColorEnabled = palette?.[key]?.enabled !== false;
-              if (!inWplacePalette || !isPaletteColorEnabled) {
+              if (!isPaletteColorEnabled) {
                 data[idx + 3] = 0; // hide disabled color center pixel
               }
             }
@@ -475,7 +529,7 @@ export default class TemplateManager {
 
           // Draws the template with somes colors disabled
           filterCtx.putImageData(img, 0, 0);
-          context.drawImage(filterCanvas, Number(template.pixelCoords[0]) * this.drawMult, Number(template.pixelCoords[1]) * this.drawMult);
+          context.drawImage(filterCanvas, px, py);
         }
       } catch (exception) {
 
@@ -483,7 +537,7 @@ export default class TemplateManager {
         console.warn('Failed to apply color filter:', exception);
 
         // Fallback to drawing raw bitmap if filtering fails
-        context.drawImage(template.bitmap, Number(template.pixelCoords[0]) * this.drawMult, Number(template.pixelCoords[1]) * this.drawMult);
+        try { context.drawImage(bmp, px, py); } catch (_) {}
       }
     }
 
@@ -506,16 +560,11 @@ export default class TemplateManager {
         aggWrong += stats.wrong || 0;
       }
 
-      // Determine total required across all templates
-      // Prefer precomputed per-template required counts; fall back to sum of processed tiles
-      const totalRequiredTemplates = this.templatesArray.reduce((sum, t) =>
-        sum + (t.requiredPixelCount || t.pixelCount || 0), 0);
-      const totalRequired = totalRequiredTemplates > 0 ? totalRequiredTemplates : aggRequiredTiles;
 
       // Turns numbers into formatted number strings. E.g., 1234 -> 1,234 OR 1.234 based on location of user
       const paintedStr = new Intl.NumberFormat().format(aggPainted);
-      const requiredStr = new Intl.NumberFormat().format(totalRequired);
-      const wrongStr = new Intl.NumberFormat().format(totalRequired - aggPainted); // Used to be aggWrong, but that is bugged
+      const requiredStr = new Intl.NumberFormat().format(aggRequiredTiles);
+      const wrongStr    = new Intl.NumberFormat().format(aggWrong);
 
       this.overlay.handleDisplayStatus(
         `Displaying ${templateCount} template${templateCount == 1 ? '' : 's'}.\nPainted ${paintedStr} / ${requiredStr} • Wrong ${wrongStr}`
@@ -605,7 +654,7 @@ export default class TemplateManager {
                     if (a < 64) { continue; }
                     if (r === 222 && g === 250 && b === 206) { continue; }
                     requiredPixelCount++;
-                    const key = activeTemplate.allowedColorsSet.has(`${r},${g},${b}`) ? `${r},${g},${b}` : 'other';
+                    const key = tpl.findNearestPaletteKey(r, g, b);
                     paletteMap.set(key, (paletteMap.get(key) || 0) + 1);
                   }
                 }
@@ -624,6 +673,22 @@ export default class TemplateManager {
           });
           template.chunked = templateTiles;
           template.requiredPixelCount = requiredPixelCount;
+
+          // Restore or (if missing) compute pixelCount and requiredPixelCount
+          const persisted = templates?.[templateKey] || {};
+          const sumTileArea = () => Object.values(templateTiles)
+            .reduce((s, bmp) => s + (bmp.width * bmp.height), 0);
+
+          // If we persisted it, trust the persisted number; otherwise compute from tile bitmaps
+          template.pixelCount = Number.isFinite(persisted.pixelCount)
+            ? Number(persisted.pixelCount)
+            : sumTileArea();
+
+          // Prefer persisted required count; else keep the one we just measured during import
+          if (Number.isFinite(persisted.requiredPixelCount)) {
+            template.requiredPixelCount = Number(persisted.requiredPixelCount);
+          }
+
           // Construct colorPalette from paletteMap
           const paletteObj = {};
           for (const [key, count] of paletteMap.entries()) { paletteObj[key] = { count, enabled: true }; }
@@ -635,6 +700,7 @@ export default class TemplateManager {
             const persisted = templates?.[templateKey]?.palette;
             if (persisted) {
               for (const [rgb, meta] of Object.entries(persisted)) {
+                if (rgb === 'other') { continue; }  //drop legacy 'other'
                 if (!template.colorPalette[rgb]) {
                   template.colorPalette[rgb] = { count: meta?.count || 0, enabled: !!meta?.enabled };
                 } else {
@@ -642,7 +708,8 @@ export default class TemplateManager {
                 }
               }
             }
-          } catch (_) {}
+          } catch (_) { }
+          delete template.colorPalette.other;
           // Store storageKey for later writes
           template.storageKey = templateKey;
           this.templatesArray.push(template);
@@ -672,4 +739,16 @@ export default class TemplateManager {
   setTemplatesShouldBeDrawn(value) {
     this.templatesShouldBeDrawn = value;
   }
+
+  getRingsMode() { return this.ringsMode | 0; }
+  setRingsMode(mode) {
+    const m = Math.max(0, Math.min(2, mode | 0));
+    this.ringsMode = m;
+    localStorage.setItem('bm:ringsMode', String(m));
+  }
+  cycleRingsMode() {
+    this.setRingsMode((this.ringsMode + 1) % 3);
+    return this.ringsMode;
+  }
+
 }

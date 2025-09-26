@@ -570,6 +570,19 @@ function buildOverlayMain() {
               instance.handleDisplayStatus('Disabled all colors');
             };
           }).buildElement()
+          .addButton({'id': 'bm-button-colors-toggle-rings', 'textContent': 'Rings: Off'}, (instance, button) => {
+            button.onclick = () => {
+              const mode = templateManager.cycleRingsMode();
+              button.textContent = (
+                mode === 0 ? 'Rings: Off' :
+                mode === 1 ? 'Rings: On' :
+                             'Rings: On+OD'
+              );
+              instance.handleDisplayStatus(
+                mode === 0 ? 'Rings off' : (mode === 1 ? 'Showing rings for wrong pixels' : 'Showing rings incl. overdrawn')
+              );
+            };
+          }).buildElement()
         .buildElement()
         .addDiv({'id': 'bm-colorfilter-list'}).buildElement()
       .buildElement()
@@ -667,12 +680,9 @@ function buildOverlayMain() {
       label.style.fontSize = '12px';
       let labelText = `${meta.count.toLocaleString()}`;
 
-      // Special handling for "other" and "transparent"
-      if (rgb === 'other') {
-        swatch.style.background = '#888'; // Neutral color for "Other"
-        labelText = `Other • ${labelText}`;
-      } else if (rgb === '#deface') {
+      if (rgb === '#deface') {
         swatch.style.background = '#deface';
+        
         labelText = `Transparent • ${labelText}`;
       } else {
         const [r, g, b] = rgb.split(',').map(Number);
