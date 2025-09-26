@@ -13,8 +13,10 @@
 // @match        https://wplace.live/*
 // @grant        GM_getResourceText
 // @grant        GM_addStyle
-// @grant        GM.setValue
 // @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM.getValue
+// @grant        GM.setValue
 // @grant        GM_xmlhttpRequest
 // @connect      telemetry.thebluecorner.net
 // @resource     CSS-BM-File https://raw.githubusercontent.com/asango100/Wplace-BlueMarble-MinorMods/051271c433a42db968a865b00f81bb979ee7d13f/dist/BlueMarble.user.css
